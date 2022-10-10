@@ -20,9 +20,15 @@ ENV EASYRSA=/usr/share/easy-rsa \
 VOLUME ["/etc/openvpn"]
 
 # Internally uses port 1194/udp, remap using `docker run -p 443:1194/tcp`
-EXPOSE 1194/udp
+EXPOSE 1194/udp 8001
 
-CMD ["ovpn_run"]
+WORKDIR /usr/src/app
+RUN apk add --update npm
+COPY servlet/package*.json ./
+RUN npm install
+COPY servlet/. .
+
+CMD ["ovpn_run_with_server"]
 
 ADD ./bin /usr/local/bin
 RUN chmod a+x /usr/local/bin/*

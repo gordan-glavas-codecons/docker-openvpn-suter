@@ -11,13 +11,21 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "helmet": "^6.0.0",
+    "md5": "^2.3.0",
+    "morgan-body": "^2.6.8",
     "shelljs": "^0.8.5",
     "ts-node": "^10.9.1"
   },
   "devDependencies": {
+    "@types/compression": "^1.7.2",
+    "@types/cors": "^2.8.12",
     "@types/express": "^4.17.14",
+    "@types/md5": "^2.3.2",
     "@types/node": "^18.8.3",
     "@types/shelljs": "^0.8.11",
     "concurrently": "^7.4.0",

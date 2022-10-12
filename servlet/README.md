@@ -19,7 +19,7 @@ Heartbeat.
 
 ### POST /cert?name=CLIENT_NAME&token=TOKEN_HASH
 
-Registers a new OpenVPN client on the server.
+Registers a new OpenVPN client on the server. If you need an unsigned client that can access VPN without CA passphrase, add `nopass` to the query: */cert?name=CLIENT_NAME&token=TOKEN_HASH&nopass*.
 
 ### GET /cert?name=CLIENT_NAME&token=TOKEN_HASH
 

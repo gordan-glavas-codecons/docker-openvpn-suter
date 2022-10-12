@@ -42,11 +42,13 @@ app.post('/cert', (req: Request, res: Response) => {
   if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
     return res.status(400).send("Invalid request!");
   }
+  const nopass = req.query.nopass !== undefined;
   const caPassphrase = process.env.CA_PASSPHRASE || "";
   const keyPassphrase = process.env.KEY_PASSPHRASE || "";
   shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
   shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
-  const output = shell.exec(`printf '${keyPassphrase}\n${keyPassphrase}\n}' | easyrsa build-client-full ${clientName}`);
+  const output = shell.exec(`printf '${keyPassphrase}\n${keyPassphrase}\n}' `
+    + `| easyrsa build-client-full ${clientName}${nopass ? " nopass" : ""}`);
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }

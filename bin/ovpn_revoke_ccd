@@ -1,0 +1,19 @@
+#!/bin/bash
+
+#
+# Remove OpenVPN ccd file
+#
+
+if [ "$DEBUG" == "1" ]; then
+    set -x
+fi
+
+set -e
+
+if [ -z "$OPENVPN" ]; then
+    export OPENVPN="$PWD"
+fi
+
+cn="$1"
+
+rm -rf "$OPENVPN/ccd/$cn"

@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#
+# Create OpenVPN ccd file
+#
+
+if [ "$DEBUG" == "1" ]; then
+    set -x
+fi
+
+set -e
+
+if [ -z "$OPENVPN" ]; then
+    export OPENVPN="$PWD"
+fi
+
+cn="$1"
+ipaddr="$2"
+
+printf "ifconfig-push $ipaddr 255.255.255.0" > "$OPENVPN/ccd/$cn"

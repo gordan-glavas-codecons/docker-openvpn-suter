@@ -1,10 +1,10 @@
-import express, { Express, Request, Response } from 'express';
+import express, { Express, Request, Response } from "express";
 import cors from "cors";
 import compression from "compression";
 import helmet from "helmet";
 import morganBody from "morgan-body";
-import dotenv from 'dotenv';
-import shell from 'shelljs';
+import dotenv from "dotenv";
+import shell from "shelljs";
 import md5 from "md5";
 
 dotenv.config();
@@ -18,6 +18,7 @@ morganBody(app);
 const port = process.env.PORT;
 const easyRsaPassInKey = "EASYRSA_PASSIN";
 const easyRsaPassOutKey = "EASYRSA_PASSOUT";
+const ipRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/;
 
 const validateToken = (req: Request): boolean => {
   const token = req.query.token;
@@ -33,13 +34,16 @@ const validateToken = (req: Request): boolean => {
   return false;
 };
 
-app.get('/', (req: Request, res: Response) => {
+app.get("/", (req: Request, res: Response) => {
   res.send("All ok!");
 });
 
-app.post('/cert', (req: Request, res: Response) => {
+app.post("/cert", (req: Request, res: Response) => {
   const clientName = req.query.name;
-  if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
+  const ip = req.query.ip;
+  if (typeof clientName !== "string" || clientName.length === 0 
+      || typeof ip !== "string" || !ipRegex.test(ip)
+      || !validateToken(req)) {
     return res.status(400).send("Invalid request!");
   }
   const nopass = req.query.nopass !== undefined;
@@ -52,10 +56,11 @@ app.post('/cert', (req: Request, res: Response) => {
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }
+  shell.exec(`ovpn_create_ccd ${clientName} ${ip}`);
   res.status(201).send();
 });
 
-app.get('/cert', (req: Request, res: Response) => {
+app.get("/cert", (req: Request, res: Response) => {
   const clientName = req.query.name;
   if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
     return res.status(400).send("Invalid request!");
@@ -64,11 +69,22 @@ app.get('/cert', (req: Request, res: Response) => {
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }
-  res.set('Content-Disposition', `attachment; filename="${clientName}.ovpn"`);
-  res.sendFile(`/usr/src/app/clientExport.ovpn`);
+  res.set("Content-Disposition", `attachment; filename="${clientName}.ovpn"`);
+  res.sendFile("/usr/src/app/clientExport.ovpn");
 });
 
-app.delete('/cert', (req: Request, res: Response) => {
+app.get("/cert/ccd", (req: Request, res: Response) => {
+  if (!validateToken(req)) {
+    return res.status(400).send("Invalid request!");
+  }
+  const output = shell.exec("ovpn_print_ccd_all");
+  if (output.code !== 0) {
+    return res.status(422).send("Invalid code while executing: " + output.code);
+  }
+  res.set("Content-Type", "text/plain").send(output);
+});
+
+app.delete("/cert", (req: Request, res: Response) => {
   const clientName = req.query.name;
   if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
     return res.status(400).send("Invalid request!");
@@ -80,6 +96,7 @@ app.delete('/cert', (req: Request, res: Response) => {
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }
+  shell.exec(`ovpn_revoke_ccd ${clientName}`);
   res.status(204).send();
 });
 

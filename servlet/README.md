@@ -17,9 +17,9 @@ Each call marked with **authorized** requires a `token` parameter in its query. 
 
 Heartbeat.
 
-### POST /cert?name=CLIENT_NAME&token=TOKEN_HASH
+### POST /cert?name=CLIENT_NAME&ip=STATIC_VPN_IP&token=TOKEN_HASH
 
-Registers a new OpenVPN client on the server. If you need an unsigned client that can access VPN without CA passphrase, add `nopass` to the query: */cert?name=CLIENT_NAME&token=TOKEN_HASH&nopass*.
+Registers a new OpenVPN client on the server with the given client name and static VPN IP address (stored in /ccd). If you need an unsigned client that can access VPN without CA passphrase, add `nopass` to the query: */cert?name=CLIENT_NAME&ip?STATIC_VPN_IP&token=TOKEN_HASH&nopass*.
 
 ### GET /cert?name=CLIENT_NAME&token=TOKEN_HASH
 
@@ -27,4 +27,8 @@ Retrieves **ovpn** file that can be sent to the client.
 
 ### DELETE /cert?name=CLIENT_NAME&token=TOKEN_HASH
 
-Unregisters the client and removes their certificates and keys.
+Unregisters the client and removes their certificates, keys and CCD entry.
+
+### GET /cert/ccd?token=TOKEN_HASH
+
+Prints the content of the CCD folder, with filenames and their content (to pair client names with their static VPN IPs).

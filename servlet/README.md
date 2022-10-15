@@ -32,3 +32,7 @@ Unregisters the client and removes their certificates, keys and CCD entry.
 ### GET /cert/ccd?token=TOKEN_HASH
 
 Prints the content of the CCD folder, with filenames and their content (to pair client names with their static VPN IPs).
+
+### POST /client?name=CLIENT_NAME&ip=STATIC_VPN_IP&pass=VNC_PASSWORD&nopass&token=TOKEN_HASH
+
+Registers a new Guacamole connection and OpenVPN client, including CCD entry. Retrieves the **ovpn** file for the client.

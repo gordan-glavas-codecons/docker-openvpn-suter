@@ -6,6 +6,7 @@ import morganBody from "morgan-body";
 import dotenv from "dotenv";
 import shell from "shelljs";
 import md5 from "md5";
+import fetch from "node-fetch";
 
 dotenv.config();
 
@@ -34,19 +35,7 @@ const validateToken = (req: Request): boolean => {
   return false;
 };
 
-app.get("/", (req: Request, res: Response) => {
-  res.send("All ok!");
-});
-
-app.post("/cert", (req: Request, res: Response) => {
-  const clientName = req.query.name;
-  const ip = req.query.ip;
-  if (typeof clientName !== "string" || clientName.length === 0 
-      || typeof ip !== "string" || !ipRegex.test(ip)
-      || !validateToken(req)) {
-    return res.status(400).send("Invalid request!");
-  }
-  const nopass = req.query.nopass !== undefined;
+const createCertificate = (clientName: string, ip: string, nopass: boolean): number => {
   const caPassphrase = process.env.CA_PASSPHRASE || "";
   const keyPassphrase = process.env.KEY_PASSPHRASE || "";
   shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
@@ -54,50 +43,190 @@ app.post("/cert", (req: Request, res: Response) => {
   const output = shell.exec(`printf '${keyPassphrase}\n${keyPassphrase}\n}' `
     + `| easyrsa build-client-full ${clientName}${nopass ? " nopass" : ""}`);
   if (output.code !== 0) {
-    return res.status(422).send("Invalid code while executing: " + output.code);
+    return output.code;
   }
   shell.exec(`ovpn_create_ccd ${clientName} ${ip}`);
-  res.status(201).send();
-});
+  return 0;
+};
 
-app.get("/cert", (req: Request, res: Response) => {
-  const clientName = req.query.name;
-  if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
-    return res.status(400).send("Invalid request!");
-  }
+const exportCertificate = (clientName: string, res: Response) => {
   const output = shell.exec(`ovpn_getclient ${clientName} > clientExport.ovpn`);
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }
   res.set("Content-Disposition", `attachment; filename="${clientName}.ovpn"`);
   res.sendFile("/usr/src/app/clientExport.ovpn");
+};
+
+interface GuacamoleAuthResponse {
+  authToken: string;
+}
+
+const postGuacamoleConnection = async (clientName: string, ip: string, password: string): Promise<boolean> => {
+  const guacHost = process.env.GUAC_HOST || "";
+  const guacUser = process.env.GUAC_USER || "";
+  const guacPass = process.env.GUAC_PASS || "";
+  const authResponse = await fetch(`${guacHost}/guacamole/api/tokens`, {
+    method: "POST",
+    body: new URLSearchParams({ 
+      username: guacUser,
+      password: guacPass,
+    })
+  });
+  const authData: GuacamoleAuthResponse = await authResponse.json();
+  console.log(`Got Guacamole auth response: ${JSON.stringify(authData)}.`);
+  const connectionResponse = await fetch(`${guacHost}/guacamole/api/session/data/postgresql/connections?${new URLSearchParams({
+    token: authData.authToken
+  })}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      "parentIdentifier": "ROOT",
+      "name": clientName,
+      "protocol": "vnc",
+      "parameters": {
+        "port": "5900",
+        "read-only": "",
+        "swap-red-blue": "",
+        "cursor": "",
+        "color-depth": "",
+        "clipboard-encoding": "",
+        "disable-copy": "",
+        "disable-paste": "",
+        "dest-port": "",
+        "recording-exclude-output": "",
+        "recording-exclude-mouse": "",
+        "recording-include-keys": "",
+        "create-recording-path": "",
+        "enable-sftp": "true",
+        "sftp-port": "",
+        "sftp-server-alive-interval": "",
+        "enable-audio": "",
+        "audio-servername": "",
+        "sftp-directory": "",
+        "sftp-root-directory": "",
+        "sftp-passphrase": "",
+        "sftp-private-key": "",
+        "sftp-username": "",
+        "sftp-password": "",
+        "sftp-host-key": "",
+        "sftp-hostname": "",
+        "recording-name": "",
+        "recording-path": "",
+        "dest-host": "",
+        "password": password,
+        "username": "",
+        "hostname": ip,
+      },
+      "attributes": {
+        "max-connections": "",
+        "max-connections-per-user": "",
+        "weight": "",
+        "failover-only": "",
+        "guacd-port": "",
+        "guacd-encryption": "",
+        "guacd-hostname": ""
+      }
+    })
+  });
+  return connectionResponse.ok;
+};
+
+app.get("/", (req: Request, res: Response) => {
+  res.send("All ok!");
+});
+
+app.post("/cert", (req: Request, res: Response) => {
+  try {
+    const clientName = req.query.name;
+    const ip = req.query.ip;
+    if (typeof clientName !== "string" || clientName.length === 0 
+        || typeof ip !== "string" || !ipRegex.test(ip)
+        || !validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    const nopass = req.query.nopass !== undefined;
+    const result = createCertificate(clientName, ip, nopass);
+    if (result !== 0) {
+      return res.status(422).send("Invalid code while executing: " + result);
+    }
+    res.status(201).send();
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+app.get("/cert", (req: Request, res: Response) => {
+  try {
+    const clientName = req.query.name;
+    if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    exportCertificate(clientName, res);
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 app.get("/cert/ccd", (req: Request, res: Response) => {
-  if (!validateToken(req)) {
-    return res.status(400).send("Invalid request!");
+  try {
+    if (!validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    const output = shell.exec("ovpn_print_ccd_all");
+    if (output.code !== 0) {
+      return res.status(422).send("Invalid code while executing: " + output.code);
+    }
+    res.set("Content-Type", "text/plain").send(output);
+  } catch (error) {
+    res.status(500).send(error);
   }
-  const output = shell.exec("ovpn_print_ccd_all");
-  if (output.code !== 0) {
-    return res.status(422).send("Invalid code while executing: " + output.code);
-  }
-  res.set("Content-Type", "text/plain").send(output);
 });
 
 app.delete("/cert", (req: Request, res: Response) => {
-  const clientName = req.query.name;
-  if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
-    return res.status(400).send("Invalid request!");
+  try {
+    const clientName = req.query.name;
+    if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    const caPassphrase = process.env.CA_PASSPHRASE || "";
+    shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
+    shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
+    const output = shell.exec(`printf 'yes\n' | ovpn_revokeclient ${clientName} passphrase remove`);
+    if (output.code !== 0) {
+      return res.status(422).send("Invalid code while executing: " + output.code);
+    }
+    shell.exec(`ovpn_revoke_ccd ${clientName}`);
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).send(error);
   }
-  const caPassphrase = process.env.CA_PASSPHRASE || "";
-  shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
-  shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
-  const output = shell.exec(`printf 'yes\n' | ovpn_revokeclient ${clientName} passphrase remove`);
-  if (output.code !== 0) {
-    return res.status(422).send("Invalid code while executing: " + output.code);
+});
+
+app.post("/client", async (req: Request, res: Response) => {
+  try {
+    const clientName = req.query.name;
+    const ip = req.query.ip;
+    const connectionPassword = req.query.pass;
+    if (typeof clientName !== "string" || clientName.length === 0 
+        || typeof ip !== "string" || !ipRegex.test(ip)
+        || typeof connectionPassword !== "string" || connectionPassword.length === 0
+        || !validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    const connectionSuccess = await postGuacamoleConnection(clientName, ip, connectionPassword);
+    if (!connectionSuccess) {
+      return res.status(422).send("Unable to create Guacamole connection!");
+    }
+    const nopass = req.query.nopass !== undefined;
+    const createCertResult = createCertificate(clientName, ip, nopass);
+    if (createCertResult !== 0) {
+      return res.status(422).send("Invalid code while creating certificate: " + createCertResult);
+    }
+    exportCertificate(clientName, res);
+  } catch (error) {
+    res.status(500).send(error);
   }
-  shell.exec(`ovpn_revoke_ccd ${clientName}`);
-  res.status(204).send();
 });
 
 app.listen(port, () => {

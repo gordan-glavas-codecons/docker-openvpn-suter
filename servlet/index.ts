@@ -98,7 +98,7 @@ const postGuacamoleConnection = async (clientName: string, ip: string, password:
         "recording-exclude-mouse": "",
         "recording-include-keys": "",
         "create-recording-path": "",
-        "enable-sftp": "true",
+        "enable-sftp": "false",
         "sftp-port": "",
         "sftp-server-alive-interval": "",
         "enable-audio": "",

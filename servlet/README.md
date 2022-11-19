@@ -36,3 +36,7 @@ Prints the content of the CCD folder, with filenames and their content (to pair 
 ### POST /client?name=CLIENT_NAME&ip=STATIC_VPN_IP&pass=VNC_PASSWORD&nopass&token=TOKEN_HASH
 
 Registers a new Guacamole connection and OpenVPN client, including CCD entry. Retrieves the **ovpn** file for the client.
+
+### DELETE /client?name=CLIENT_NAME&token=TOKEN_HASH
+
+Unregisters a Guacamole connection and OpenVPN client, including CCD entry.

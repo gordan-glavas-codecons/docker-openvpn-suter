@@ -161,7 +161,7 @@ const postGuacamoleConnection = async (clientName: string, ip: string, password:
 const deleteGuacamoleConnection = async (clientName: string): Promise<boolean> => {
   const guacHost = process.env.GUAC_HOST || "";
   const authData = await getGuacamoleAuth();
-  const connectionsResponse = await fetch(`${guacHost}/api/session/data/postgresql/connections?${new URLSearchParams({
+  const connectionsResponse = await fetch(`${guacHost}/guacamole/api/session/data/postgresql/connections?${new URLSearchParams({
     token: authData.authToken
   })}`);
   const connectionsData: GuacamoleConnectionsResponse = await connectionsResponse.json();

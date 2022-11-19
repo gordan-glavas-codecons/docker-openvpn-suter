@@ -62,7 +62,27 @@ interface GuacamoleAuthResponse {
   authToken: string;
 }
 
-const postGuacamoleConnection = async (clientName: string, ip: string, password: string): Promise<boolean> => {
+interface GuacamoleConnectionResponse {
+  name: string;
+  identifier: string;
+}
+
+type GuacamoleConnectionsResponse = Record<string, GuacamoleConnectionResponse>
+
+const revokeCertificate = (clientName: string, res: Response) => {
+  const caPassphrase = process.env.CA_PASSPHRASE || "";
+  shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
+  shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
+  const output = shell.exec(`printf 'yes\n' | ovpn_revokeclient ${clientName} passphrase remove`);
+  if (output.code !== 0) {
+    res.status(422).send("Invalid code while executing: " + output.code);
+    return false;
+  }
+  shell.exec(`ovpn_revoke_ccd ${clientName}`);
+  return true;
+};
+
+const getGuacamoleAuth = async () => {
   const guacHost = process.env.GUAC_HOST || "";
   const guacUser = process.env.GUAC_USER || "";
   const guacPass = process.env.GUAC_PASS || "";
@@ -75,6 +95,12 @@ const postGuacamoleConnection = async (clientName: string, ip: string, password:
   });
   const authData: GuacamoleAuthResponse = await authResponse.json();
   console.log(`Got Guacamole auth response: ${JSON.stringify(authData)}.`);
+  return authData;
+};
+
+const postGuacamoleConnection = async (clientName: string, ip: string, password: string): Promise<boolean> => {
+  const guacHost = process.env.GUAC_HOST || "";
+  const authData = await getGuacamoleAuth();
   const connectionResponse = await fetch(`${guacHost}/guacamole/api/session/data/postgresql/connections?${new URLSearchParams({
     token: authData.authToken
   })}`, {
@@ -130,6 +156,27 @@ const postGuacamoleConnection = async (clientName: string, ip: string, password:
     })
   });
   return connectionResponse.ok;
+};
+
+const deleteGuacamoleConnection = async (clientName: string): Promise<boolean> => {
+  const guacHost = process.env.GUAC_HOST || "";
+  const authData = await getGuacamoleAuth();
+  const connectionsResponse = await fetch(`${guacHost}/api/session/data/postgresql/connections?${new URLSearchParams({
+    token: authData.authToken
+  })}`);
+  const connectionsData: GuacamoleConnectionsResponse = await connectionsResponse.json();
+  console.log(`Got Guacamole connections response: ${JSON.stringify(connectionsData)}.`);
+  for (const connection of Object.values(connectionsData)) {
+    if (connection.name === clientName) {
+      const deleteResponse = await fetch(`${guacHost}/guacamole/api/session/data/postgresql/connections/${connection.identifier}?${new URLSearchParams({
+        token: authData.authToken
+      })}`, {
+        method: "DELETE"
+      });
+      return deleteResponse.ok;
+    }
+  }
+  return false;
 };
 
 app.get("/", (req: Request, res: Response) => {
@@ -189,15 +236,9 @@ app.delete("/cert", (req: Request, res: Response) => {
     if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
       return res.status(400).send("Invalid request!");
     }
-    const caPassphrase = process.env.CA_PASSPHRASE || "";
-    shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
-    shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
-    const output = shell.exec(`printf 'yes\n' | ovpn_revokeclient ${clientName} passphrase remove`);
-    if (output.code !== 0) {
-      return res.status(422).send("Invalid code while executing: " + output.code);
+    if (revokeCertificate(clientName, res)) {
+      res.status(204).send();
     }
-    shell.exec(`ovpn_revoke_ccd ${clientName}`);
-    res.status(204).send();
   } catch (error) {
     res.status(500).send(error);
   }
@@ -224,6 +265,24 @@ app.post("/client", async (req: Request, res: Response) => {
       return res.status(422).send("Invalid code while creating certificate: " + createCertResult);
     }
     exportCertificate(clientName, res);
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
+app.delete("/client", async (req: Request, res: Response) => {
+  try {
+    const clientName = req.query.name;
+    if (typeof clientName !== "string" || clientName.length === 0 || !validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    if (revokeCertificate(clientName, res)) {
+      if (await deleteGuacamoleConnection(clientName)) {
+        res.status(204).send();
+      } else {
+        res.status(422).send("Error deleting Guacamole connection!");
+      }
+    }
   } catch (error) {
     res.status(500).send(error);
   }

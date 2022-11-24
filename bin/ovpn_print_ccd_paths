@@ -1,0 +1,17 @@
+ #!/bin/bash
+
+#
+# Prints all CCD file names with their content
+#
+
+if [ "$DEBUG" == "1" ]; then
+    set -x
+fi
+
+set -e
+
+if [ -z "$OPENVPN" ]; then
+    export OPENVPN="$PWD"
+fi
+
+find $OPENVPN/ccd -type f

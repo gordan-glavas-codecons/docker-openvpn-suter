@@ -17,4 +17,4 @@ fi
 cn="$1"
 ipaddr="$2"
 
-printf "ifconfig-push $ipaddr 255.255.255.0" > "$OPENVPN/ccd/$cn"
+printf "ifconfig-push $ipaddr 255.255.0.0" > "$OPENVPN/ccd/$cn"

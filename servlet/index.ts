@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import shell from "shelljs";
 import md5 from "md5";
 import fetch from "node-fetch";
+import fs from "fs";
 
 dotenv.config();
 
@@ -20,6 +21,68 @@ const port = process.env.PORT;
 const easyRsaPassInKey = "EASYRSA_PASSIN";
 const easyRsaPassOutKey = "EASYRSA_PASSOUT";
 const ipRegex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/;
+
+type PartialIpAddress = {
+  0: number;
+  1: number;
+}
+const ccdFileNameRegex = /\/ccd\/(.+)$/;
+const ifconfigPushRegex = /^ifconfig-push 10\.8\.(\d+)\.(\d+)/;
+const defaultIpRegex = /^10\.8\.(\d+)\.(\d+)$/;
+const ccdIpTable: Record<string, PartialIpAddress> = { };
+
+const loadCcdIpTable = async () => {
+  try {
+    const output = shell.exec("ovpn_print_ccd_paths");
+    if (output.code !== 0) {
+      console.error("Invalid code while executing: " + output.code);
+      return;
+    }
+    const paths = output.split("\n");
+    for (const path of paths) {
+      const fileNameMatch = path.match(ccdFileNameRegex);
+      if (!fileNameMatch || fileNameMatch.length < 2) {
+        continue;
+      }
+      const fileContent = await fs.promises.readFile(path, "utf-8");
+      const ifconfigPushMatch = fileContent.match(ifconfigPushRegex);
+      if (!ifconfigPushMatch || ifconfigPushMatch.length < 3) {
+        continue;
+      }
+      const fileName = fileNameMatch[1];
+      const partialIp: PartialIpAddress = [Number(ifconfigPushMatch[1]), Number(ifconfigPushMatch[2])];
+      ccdIpTable[fileName] = partialIp;
+    }
+    console.log(`Loaded ${ccdIpTable.length} CCDs.`);
+  } catch (error) {
+    console.log("Error reading CCDs: " + error);
+  }
+};
+
+const addNewCcdIpAddress = (clientName: string, ip: string) => {
+  const ipMatches = ip.match(defaultIpRegex);
+  if (ipMatches) {
+    ccdIpTable[clientName] = [Number(ipMatches[1]), Number(ipMatches[2])];
+  }
+};
+
+const getNextCcdIpAddress = (): string => {
+  let maxIp: PartialIpAddress = [-1, -1];
+  for (const partialIp of Object.values(ccdIpTable)) {
+    console.log(partialIp);
+    if (partialIp[0] > maxIp[0] || partialIp[1] > maxIp[1]) {
+      maxIp = partialIp;
+    }
+  }
+  console.log("max");
+  console.log(maxIp);
+  const newIp = [maxIp[0], maxIp[1] + 1];
+  if (newIp[1] === 255) {
+    newIp[0]++;
+    newIp[1] = 1;
+  }
+  return `10.8.${newIp[0]}.${newIp[1]}`;
+};
 
 const validateToken = (req: Request): boolean => {
   const token = req.query.token;
@@ -197,6 +260,7 @@ app.post("/cert", (req: Request, res: Response) => {
     if (result !== 0) {
       return res.status(422).send("Invalid code while executing: " + result);
     }
+    addNewCcdIpAddress(clientName, ip);
     res.status(201).send();
   } catch (error) {
     res.status(500).send(error);
@@ -230,6 +294,17 @@ app.get("/cert/ccd", (req: Request, res: Response) => {
   }
 });
 
+app.get("/cert/ccd/next", (req: Request, res: Response) => {
+  try {
+    if (!validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    res.set("Content-Type", "text/plain").send(getNextCcdIpAddress());
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
 app.delete("/cert", (req: Request, res: Response) => {
   try {
     const clientName = req.query.name;
@@ -237,6 +312,7 @@ app.delete("/cert", (req: Request, res: Response) => {
       return res.status(400).send("Invalid request!");
     }
     if (revokeCertificate(clientName, res)) {
+      delete ccdIpTable[clientName];
       res.status(204).send();
     }
   } catch (error) {
@@ -247,7 +323,10 @@ app.delete("/cert", (req: Request, res: Response) => {
 app.post("/client", async (req: Request, res: Response) => {
   try {
     const clientName = req.query.name;
-    const ip = req.query.ip;
+    let ip = req.query.ip;
+    if (!ip) {
+      ip = getNextCcdIpAddress();
+    }
     const connectionPassword = req.query.pass;
     if (typeof clientName !== "string" || clientName.length === 0 
         || typeof ip !== "string" || !ipRegex.test(ip)
@@ -264,6 +343,7 @@ app.post("/client", async (req: Request, res: Response) => {
     if (createCertResult !== 0) {
       return res.status(422).send("Invalid code while creating certificate: " + createCertResult);
     }
+    addNewCcdIpAddress(clientName, ip);
     exportCertificate(clientName, res);
   } catch (error) {
     res.status(500).send(error);
@@ -278,6 +358,7 @@ app.delete("/client", async (req: Request, res: Response) => {
     }
     if (revokeCertificate(clientName, res)) {
       if (await deleteGuacamoleConnection(clientName)) {
+        delete ccdIpTable[clientName];
         res.status(204).send();
       } else {
         res.status(422).send("Error deleting Guacamole connection!");
@@ -288,6 +369,7 @@ app.delete("/client", async (req: Request, res: Response) => {
   }
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
+  await loadCcdIpTable();
   console.log(`⚡️[server]: Server is running at port ${port}!`);
 });

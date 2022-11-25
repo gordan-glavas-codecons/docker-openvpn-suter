@@ -30,6 +30,7 @@ const ccdFileNameRegex = /\/ccd\/(.+)$/;
 const ifconfigPushRegex = /^ifconfig-push 10\.8\.(\d+)\.(\d+)/;
 const defaultIpRegex = /^10\.8\.(\d+)\.(\d+)$/;
 const ccdIpTable: Record<string, PartialIpAddress> = { };
+let maxIp: PartialIpAddress = [-1, -1];
 
 const loadCcdIpTable = async () => {
   try {
@@ -53,7 +54,8 @@ const loadCcdIpTable = async () => {
       const partialIp: PartialIpAddress = [Number(ifconfigPushMatch[1]), Number(ifconfigPushMatch[2])];
       ccdIpTable[fileName] = partialIp;
     }
-    console.log(`Loaded ${ccdIpTable.length} CCDs.`);
+    updateMaxCcdIp();
+    console.log(`Loaded ${Object.keys(ccdIpTable).length} CCDs.`);
   } catch (error) {
     console.log("Error reading CCDs: " + error);
   }
@@ -62,20 +64,36 @@ const loadCcdIpTable = async () => {
 const addNewCcdIpAddress = (clientName: string, ip: string) => {
   const ipMatches = ip.match(defaultIpRegex);
   if (ipMatches) {
-    ccdIpTable[clientName] = [Number(ipMatches[1]), Number(ipMatches[2])];
+    const newIp: PartialIpAddress = [Number(ipMatches[1]), Number(ipMatches[2])];
+    ccdIpTable[clientName] = newIp;
+    compareCcdIpWithMaxAndUpdate(newIp);
+  }
+};
+
+const removeCcdIpAddress = (clientName: string) => {
+  const ip = ccdIpTable[clientName];
+  if (ip) {
+    delete ccdIpTable[clientName];
+    if (ip[0] === maxIp[0] && ip[1] === maxIp[1]) {
+      updateMaxCcdIp();
+    }
+  }
+};
+
+const updateMaxCcdIp = () => {
+  maxIp = [-1, -1];
+  for (const partialIp of Object.values(ccdIpTable)) {
+    compareCcdIpWithMaxAndUpdate(partialIp);
+  }
+};
+
+const compareCcdIpWithMaxAndUpdate = (ip: PartialIpAddress) => {
+  if (ip[0] > maxIp[0] || ip[1] > maxIp[1]) {
+    maxIp = ip;
   }
 };
 
 const getNextCcdIpAddress = (): string => {
-  let maxIp: PartialIpAddress = [-1, -1];
-  for (const partialIp of Object.values(ccdIpTable)) {
-    console.log(partialIp);
-    if (partialIp[0] > maxIp[0] || partialIp[1] > maxIp[1]) {
-      maxIp = partialIp;
-    }
-  }
-  console.log("max");
-  console.log(maxIp);
   const newIp = [maxIp[0], maxIp[1] + 1];
   if (newIp[1] === 255) {
     newIp[0]++;
@@ -121,17 +139,6 @@ const exportCertificate = (clientName: string, res: Response) => {
   res.sendFile("/usr/src/app/clientExport.ovpn");
 };
 
-interface GuacamoleAuthResponse {
-  authToken: string;
-}
-
-interface GuacamoleConnectionResponse {
-  name: string;
-  identifier: string;
-}
-
-type GuacamoleConnectionsResponse = Record<string, GuacamoleConnectionResponse>
-
 const revokeCertificate = (clientName: string, res: Response) => {
   const caPassphrase = process.env.CA_PASSPHRASE || "";
   shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
@@ -144,6 +151,17 @@ const revokeCertificate = (clientName: string, res: Response) => {
   shell.exec(`ovpn_revoke_ccd ${clientName}`);
   return true;
 };
+
+interface GuacamoleAuthResponse {
+  authToken: string;
+}
+
+interface GuacamoleConnectionResponse {
+  name: string;
+  identifier: string;
+}
+
+type GuacamoleConnectionsResponse = Record<string, GuacamoleConnectionResponse>
 
 const getGuacamoleAuth = async () => {
   const guacHost = process.env.GUAC_HOST || "";
@@ -305,6 +323,18 @@ app.get("/cert/ccd/next", (req: Request, res: Response) => {
   }
 });
 
+app.post("/cert/ccd/reload", async (req: Request, res: Response) => {
+  try {
+    if (!validateToken(req)) {
+      return res.status(400).send("Invalid request!");
+    }
+    await loadCcdIpTable();
+    res.set("Content-Type", "application/json").send(JSON.stringify(ccdIpTable));
+  } catch (error) {
+    res.status(500).send(error);
+  }
+});
+
 app.delete("/cert", (req: Request, res: Response) => {
   try {
     const clientName = req.query.name;
@@ -312,7 +342,7 @@ app.delete("/cert", (req: Request, res: Response) => {
       return res.status(400).send("Invalid request!");
     }
     if (revokeCertificate(clientName, res)) {
-      delete ccdIpTable[clientName];
+      removeCcdIpAddress(clientName);
       res.status(204).send();
     }
   } catch (error) {
@@ -358,7 +388,7 @@ app.delete("/client", async (req: Request, res: Response) => {
     }
     if (revokeCertificate(clientName, res)) {
       if (await deleteGuacamoleConnection(clientName)) {
-        delete ccdIpTable[clientName];
+        removeCcdIpAddress(clientName);
         res.status(204).send();
       } else {
         res.status(422).send("Error deleting Guacamole connection!");

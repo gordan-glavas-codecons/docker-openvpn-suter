@@ -147,7 +147,7 @@ const createCertificate = (
   shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
   shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
   const output = shell.exec(
-    `printf '${keyPassphrase}\n${keyPassphrase}\n}' ` +
+    `printf 'yes\n${keyPassphrase}\n${keyPassphrase}\n' ` +
       `| easyrsa build-client-full ${clientName}${nopass ? " nopass" : ""}`
   );
   if (output.code !== 0) {

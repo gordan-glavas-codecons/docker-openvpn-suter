@@ -143,13 +143,22 @@ const createCertificate = (
   nopass: boolean
 ): number => {
   const caPassphrase = process.env.CA_PASSPHRASE || "";
-  const keyPassphrase = process.env.KEY_PASSPHRASE || "";
+  // const keyPassphrase = process.env.KEY_PASSPHRASE || "";
   shell.env[easyRsaPassInKey] = `pass:${caPassphrase}`;
-  shell.env[easyRsaPassOutKey] = `pass:${caPassphrase}`;
-  const output = shell.exec(
-    `printf 'yes\n${keyPassphrase}\n${keyPassphrase}\n' ` +
-      `| easyrsa build-client-full ${clientName}${nopass ? " nopass" : ""}`
-  );
+  shell.env[easyRsaPassOutKey] = "pass:";
+  const command = `easyrsa --batch build-client-full ${clientName} nopass`;
+  console.log(`Executing command: ${command}`);
+  const output = shell.exec(command, {
+    env: {
+      ...process.env,
+      EASYRSA_PASSOUT: "",
+      EASYRSA_BATCH: "1",
+    },
+  });
+  console.log("Output");
+  process.stdout.write(output.stdout);
+  console.log("Error");
+  process.stderr.write(output.stderr);
   if (output.code !== 0) {
     return output.code;
   }

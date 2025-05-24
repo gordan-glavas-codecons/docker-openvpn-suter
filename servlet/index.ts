@@ -168,6 +168,8 @@ const createCertificate = (
 
 const exportCertificate = (clientName: string, res: Response) => {
   const output = shell.exec(`ovpn_getclient ${clientName} > clientExport.ovpn`);
+  shell.exec('sed -i "s/443 tcp/1194 udp/g" clientExport.ovpn'); // replace 443 tcp with 1194 udp
+  shell.exec("printf 'tun-mtu 1400\nmssfix 1360' >> clientExport.ovpn");
   if (output.code !== 0) {
     return res.status(422).send("Invalid code while executing: " + output.code);
   }
